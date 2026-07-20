@@ -321,6 +321,9 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
   .search-bar select{display:none;}
 }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -333,11 +336,7 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
       <button data-mode="b2c" class="active" onclick="setMode('b2c')">Achat direct</button>
       <button data-mode="b2b" onclick="setMode('b2b')">Devis & Gros (B2B)</button>
     </div>
-    <select class="role-select" onchange="setRole(this.value)">
-      <option value="buyer">👤 Acheteur (démo)</option>
-      <option value="vendor">🏭 Vendeur (démo)</option>
-      <option value="admin">🛡️ Admin (démo)</option>
-    </select>
+    <button class="role-select" id="accountBtn" onclick="openAuthModal()" style="cursor:pointer">👤 Se connecter / S'inscrire</button>
   </div>
 </div>
 
@@ -355,8 +354,8 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
     <button class="nav-btn" onclick="navigate('messages')"><span class="ic">💬</span>Messages<span class="badge" id="msgBadge" style="display:none">0</span></button>
     <button class="nav-btn" onclick="navigate('orders')"><span class="ic">📦</span>Commandes</button>
     <button class="nav-btn" onclick="navigate('cart')"><span class="ic">🛒</span>Panier<span class="badge" id="cartBadge" style="display:none">0</span></button>
-    <button class="nav-btn" id="dashNavBtn" style="display:none" onclick="navigate('vendor')"><span class="ic">🏭</span>Vendeur</button>
-    <button class="nav-btn" id="adminNavBtn" style="display:none" onclick="navigate('admin')"><span class="ic">🛡️</span>Admin</button>
+    <button class="nav-btn" id="dashNavBtn" onclick="navigate('vendor')"><span class="ic">🏭</span>Vendeur</button>
+    <button class="nav-btn" id="adminNavBtn" onclick="navigate('admin')"><span class="ic">🛡️</span>Admin</button>
   </nav>
 </header>
 
@@ -475,7 +474,123 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
    ========================================================= */
 const CATEGORIES = ["Électronique","Textile & Mode","Machines industrielles","Maison & Jardin","Beauté & Santé","Auto & Moto"];
 
-const VENDORS = [
+/* ---------- Authentification ---------- */
+function openAuthModal(){
+  openModal(`
+    <h3 id="authTitle">Se connecter</h3>
+    <div id="authNameField" style="display:none" class="form-field"><label>Nom complet</label><input id="authName" placeholder="Jean Dupont"></div>
+    <div class="form-field"><label>Email</label><input id="authEmail" type="email" placeholder="vous@exemple.com"></div>
+    <div class="form-field"><label>Mot de passe</label><input id="authPass" type="password" placeholder="6 caractères minimum"></div>
+    <div id="authError" style="color:var(--red);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary btn-full" id="authSubmitBtn" onclick="submitLogin()">Se connecter</button>
+    <p style="text-align:center;font-size:12.5px;color:var(--slate);margin-top:12px">
+      Pas encore de compte ? <a href="#" style="color:var(--ink);font-weight:600" onclick="toggleAuthMode();return false;">S'inscrire</a>
+    </p>
+  `);
+  window._authMode = 'login';
+}
+function toggleAuthMode(){
+  window._authMode = window._authMode === 'login' ? 'signup' : 'login';
+  const isSignup = window._authMode === 'signup';
+  document.getElementById('authTitle').textContent = isSignup ? "Créer un compte" : "Se connecter";
+  document.getElementById('authNameField').style.display = isSignup ? 'block' : 'none';
+  document.getElementById('authSubmitBtn').textContent = isSignup ? "S'inscrire" : "Se connecter";
+  document.getElementById('authSubmitBtn').setAttribute('onclick', isSignup ? 'submitSignup()' : 'submitLogin()');
+  document.querySelector('#modalRoot p').innerHTML = isSignup
+    ? `Déjà un compte ? <a href="#" style="color:var(--ink);font-weight:600" onclick="toggleAuthMode();return false;">Se connecter</a>`
+    : `Pas encore de compte ? <a href="#" style="color:var(--ink);font-weight:600" onclick="toggleAuthMode();return false;">S'inscrire</a>`;
+}
+function authErr(msg){ document.getElementById('authError').textContent = msg; }
+function submitSignup(){
+  const name = document.getElementById('authName').value.trim();
+  const email = document.getElementById('authEmail').value.trim();
+  const pass = document.getElementById('authPass').value;
+  if(!name){ authErr("Merci d'indiquer votre nom."); return; }
+  if(!email || !pass || pass.length<6){ authErr("Email valide et mot de passe de 6 caractères minimum requis."); return; }
+  auth.createUserWithEmailAndPassword(email, pass).then(cred=>{
+    return cred.user.updateProfile({displayName:name}).then(()=>{
+      return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now()});
+    });
+  }).then(()=>{
+    closeModal();
+    toast("Compte créé — bienvenue " + name + " !");
+  }).catch(e=>authErr(traduireErreurFirebase(e)));
+}
+function submitLogin(){
+  const email = document.getElementById('authEmail').value.trim();
+  const pass = document.getElementById('authPass').value;
+  if(!email || !pass){ authErr("Merci de renseigner votre email et mot de passe."); return; }
+  auth.signInWithEmailAndPassword(email, pass).then(()=>{
+    closeModal();
+    toast("Connexion réussie ✔");
+  }).catch(e=>authErr(traduireErreurFirebase(e)));
+}
+function logOut(){
+  auth.signOut().then(()=>{ toast("Déconnecté(e)"); navigate('home'); });
+}
+function traduireErreurFirebase(e){
+  const map = {
+    'auth/email-already-in-use': "Cet email est déjà associé à un compte.",
+    'auth/invalid-email': "Adresse email invalide.",
+    'auth/weak-password': "Mot de passe trop faible (6 caractères minimum).",
+    'auth/user-not-found': "Aucun compte ne correspond à cet email.",
+    'auth/wrong-password': "Mot de passe incorrect.",
+    'auth/invalid-credential': "Email ou mot de passe incorrect.",
+  };
+  return map[e.code] || "Une erreur est survenue. Réessayez.";
+}
+function requireAuth(actionLabel){
+  if(currentUser) return true;
+  openAuthModal();
+  toast("Connectez-vous pour " + (actionLabel||"continuer"));
+  return false;
+}
+auth.onAuthStateChanged(user=>{
+  if(user){
+    currentUser = {uid:user.uid, name:user.displayName||user.email, email:user.email};
+    currentVendorId = user.uid;
+    document.getElementById('accountBtn').textContent = "👤 " + currentUser.name;
+    document.getElementById('accountBtn').setAttribute('onclick','openAccountMenu()');
+    ensureVendorProfile(user.uid, currentUser.name);
+  } else {
+    currentUser = null;
+    currentVendorId = null;
+    document.getElementById('accountBtn').textContent = "👤 Se connecter / S'inscrire";
+    document.getElementById('accountBtn').setAttribute('onclick','openAuthModal()');
+  }
+});
+function openAccountMenu(){
+  openModal(`
+    <h3>${currentUser.name}</h3>
+    <p style="font-size:12.5px;color:var(--slate);margin-bottom:16px">${currentUser.email}</p>
+    <button class="btn btn-outline btn-full" style="margin-bottom:8px" onclick="closeModal();navigate('vendor')">🏭 Mon espace vendeur</button>
+    <button class="btn btn-danger btn-full" onclick="closeModal();logOut()">Se déconnecter</button>
+  `);
+}
+function ensureVendorProfile(uid, name){
+  if(vendorOf(uid)) return;
+  VENDORS.push({id:uid, name:name+" (vendeur)", country:"—", verified:false, rating:5.0, years:0, responseRate:100, status:"active"});
+}
+
+/* ---------- Produits synchronisés en direct avec Firestore ---------- */
+function watchProducts(){
+  db.collection('products').onSnapshot(snap=>{
+    if(snap.empty){
+      // Base vide : on l'amorce une seule fois avec les produits de démo
+      const batch = db.batch();
+      SEED_PRODUCTS.forEach(p=>batch.set(db.collection('products').doc(p.id), p));
+      batch.commit().catch(()=>{});
+      PRODUCTS = SEED_PRODUCTS.slice();
+    } else {
+      PRODUCTS = snap.docs.map(d=>d.data());
+    }
+    if(document.getElementById('view-home').classList.contains('active')) renderHome();
+    if(document.getElementById('view-catalog').classList.contains('active')) renderCatalog();
+    if(document.getElementById('view-vendor').classList.contains('active')) vendorTab(window._vendorActiveTab||'overview');
+  }, err=>{ console.error(err); toast("Impossible de charger les produits."); });
+}
+
+let VENDORS = [
   {id:"v1", name:"Shenzhen Volt Electronics", country:"Chine", verified:true, rating:4.8, years:9, responseRate:97, status:"active"},
   {id:"v2", name:"Anatolia Textile Group", country:"Turquie", verified:true, rating:4.6, years:14, responseRate:92, status:"active"},
   {id:"v3", name:"Milano Casa Design", country:"Italie", verified:false, rating:4.3, years:3, responseRate:81, status:"active"},
@@ -483,7 +598,7 @@ const VENDORS = [
   {id:"v5", name:"Lagos Beauty Naturals", country:"Nigéria", verified:false, rating:4.1, years:2, responseRate:75, status:"pending"},
 ];
 
-let PRODUCTS = [
+const SEED_PRODUCTS = [
   {id:"p1", vendorId:"v1", cat:"Électronique", title:"Écouteurs sans fil Bluetooth 5.3 avec réduction de bruit", emoji:"🎧", unitPrice:14.9, moq:50, stock:8000, rating:4.7, tiers:[[50,14.9],[200,12.4],[1000,10.1]], desc:"Écouteurs intra-auriculaires avec réduction de bruit active, autonomie 30h avec boîtier de charge, certification IP54."},
   {id:"p2", vendorId:"v1", cat:"Électronique", title:"Chargeur rapide USB-C 65W GaN 3 ports", emoji:"🔌", unitPrice:9.5, moq:100, stock:15000, rating:4.5, tiers:[[100,9.5],[500,7.8],[2000,6.2]], desc:"Chargeur GaN compact, charge rapide PD 3.0, compatible smartphones et laptops."},
   {id:"p3", vendorId:"v1", cat:"Électronique", title:"Montre connectée sport écran AMOLED", emoji:"⌚", unitPrice:22.0, moq:30, stock:5000, rating:4.4, tiers:[[30,22],[150,18.5],[600,15]], desc:"Montre connectée avec suivi cardiaque, GPS, étanche 5ATM, autonomie 10 jours."},
@@ -498,9 +613,24 @@ let PRODUCTS = [
   {id:"p12", vendorId:"v5", cat:"Beauté & Santé", title:"Huiles essentielles bio - coffret assorti", emoji:"🌿", unitPrice:5.6, moq:150, stock:20000, rating:4.5, tiers:[[150,5.6],[600,4.7],[2400,3.9]], desc:"Coffret de 6 huiles essentielles biologiques certifiées, flacons ambrés 10ml."},
 ];
 
-let currentUser = {id:"u1", name:"Vous"};
-let currentRole = "buyer"; // buyer | vendor | admin
-let currentVendorId = "v1"; // vendor role démo -> gère v1
+/* =========================================================
+   FIREBASE — authentification et base de données partagée
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyDqcdgaMwGU8LNqjNjT9sArSI1DaYA4-2g",
+  authDomain: "biketcom-a8a37.firebaseapp.com",
+  projectId: "biketcom-a8a37",
+  storageBucket: "biketcom-a8a37.firebasestorage.app",
+  messagingSenderId: "133193385920",
+  appId: "1:133193385920:web:6a606e5015d36260f1aa25"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let PRODUCTS = []; // rempli en direct depuis Firestore
+let currentUser = null;      // {uid, name, email} une fois connecté, sinon null
+let currentVendorId = null;  // = uid du vendeur connecté
 let mode = "b2c"; // b2c | b2b
 
 let cart = []; // {productId, qty}
@@ -559,16 +689,6 @@ function setMode(m){
   document.querySelectorAll('.mode-toggle button').forEach(b=>b.classList.toggle('active', b.dataset.mode===m));
   toast(m==='b2c' ? "Mode Achat direct activé — prix unitaires affichés." : "Mode Devis & Gros activé — négociez vos prix en volume.");
   renderHome(); renderCatalog();
-}
-
-function setRole(r){
-  currentRole = r;
-  document.getElementById('dashNavBtn').style.display = r==='vendor' ? 'flex' : 'none';
-  document.getElementById('adminNavBtn').style.display = r==='admin' ? 'flex' : 'none';
-  toast("Rôle changé : " + (r==='buyer'?"Acheteur":r==='vendor'?"Vendeur":"Administrateur"));
-  if(r==='vendor') navigate('vendor');
-  else if(r==='admin') navigate('admin');
-  else navigate('home');
 }
 
 /* =========================================================
@@ -982,6 +1102,11 @@ function updateMsgBadge(){
    VENDOR DASHBOARD
    ========================================================= */
 function vendorTab(tab){
+  window._vendorActiveTab = tab;
+  if(!requireAuth("accéder à votre espace vendeur")){
+    document.getElementById('vendorContent').innerHTML = `<div class="empty-state"><div class="ic">🔒</div>Connectez-vous ou créez un compte pour publier et gérer vos produits.</div>`;
+    return;
+  }
   document.querySelectorAll('#vendorMenu a').forEach(a=>a.classList.toggle('active', a.dataset.tab===tab));
   const root = document.getElementById('vendorContent');
   const myProducts = PRODUCTS.filter(p=>p.vendorId===currentVendorId);
@@ -1052,15 +1177,19 @@ function editStock(id){
 }
 function saveStock(id){
   const p = productOf(id);
-  p.stock = Number(document.getElementById('editStockVal').value)||p.stock;
-  p.unitPrice = Number(document.getElementById('editPriceVal').value)||p.unitPrice;
-  closeModal(); vendorTab('products'); toast("Produit mis à jour ✔");
+  const stock = Number(document.getElementById('editStockVal').value)||p.stock;
+  const unitPrice = Number(document.getElementById('editPriceVal').value)||p.unitPrice;
+  db.collection('products').doc(id).update({stock, unitPrice}).then(()=>{
+    closeModal(); vendorTab('products'); toast("Produit mis à jour ✔");
+  }).catch(()=>toast("Échec de la mise à jour."));
 }
 function deleteProduct(id){
-  PRODUCTS = PRODUCTS.filter(p=>p.id!==id);
-  vendorTab('products'); toast("Produit supprimé");
+  db.collection('products').doc(id).delete().then(()=>{
+    vendorTab('products'); toast("Produit supprimé");
+  }).catch(()=>toast("Échec de la suppression."));
 }
 function openAddProductModal(){
+  if(!requireAuth("publier un produit")) return;
   openModal(`
     <h3>Ajouter un produit</h3>
     <div class="form-field"><label>Titre</label><input id="npTitle" placeholder="Ex : Lot de gourdes inox 500ml"></div>
@@ -1075,15 +1204,18 @@ function openAddProductModal(){
   `);
 }
 function addProduct(){
+  if(!requireAuth("publier un produit")) return;
   const title = document.getElementById('npTitle').value.trim();
   if(!title){ toast("Merci d'indiquer un titre."); return; }
   const price = Number(document.getElementById('npPrice').value)||10;
   const moq = Number(document.getElementById('npMoq').value)||50;
   const cat = document.getElementById('npCat').value;
-  const id = 'p'+(PRODUCTS.length+1)+Math.floor(Math.random()*999);
-  PRODUCTS.push({id, vendorId:currentVendorId, cat, title, emoji:"📦", unitPrice:price, moq, stock:1000, rating:4.0,
-    tiers:[[moq,price],[moq*4,+(price*0.85).toFixed(2)],[moq*10,+(price*0.7).toFixed(2)]], desc:"Nouveau produit publié par le vendeur."});
-  closeModal(); vendorTab('products'); toast("Produit publié ✔");
+  const id = 'p_'+currentVendorId.slice(0,6)+'_'+Date.now();
+  const product = {id, vendorId:currentVendorId, cat, title, emoji:"📦", unitPrice:price, moq, stock:1000, rating:4.0,
+    tiers:[[moq,price],[moq*4,+(price*0.85).toFixed(2)],[moq*10,+(price*0.7).toFixed(2)]], desc:"Nouveau produit publié par le vendeur."};
+  db.collection('products').doc(id).set(product).then(()=>{
+    closeModal(); vendorTab('products'); toast("Produit publié ✔ — visible par tous les visiteurs");
+  }).catch(()=>toast("Échec de la publication."));
 }
 function renderVendorMessages(root){
   const myConvs = conversations.filter(c=>c.vendorId===currentVendorId);
@@ -1158,15 +1290,15 @@ function adminTab(tab){
 }
 function approveVendor(id){ vendorOf(id).status='active'; adminTab('vendors'); toast("Fournisseur approuvé ✔"); }
 function suspendVendor(id){ vendorOf(id).status='pending'; adminTab('vendors'); toast("Fournisseur suspendu"); }
-function adminDeleteProduct(id){ PRODUCTS = PRODUCTS.filter(p=>p.id!==id); adminTab('products'); toast("Produit retiré du catalogue"); }
+function adminDeleteProduct(id){ db.collection('products').doc(id).delete().then(()=>{ adminTab('products'); toast("Produit retiré du catalogue"); }); }
 
 /* =========================================================
    INIT
    ========================================================= */
 function init(){
   initCatalogFilters();
-  renderHome();
   updateCartBadge();
+  watchProducts(); // charge les produits en direct depuis Firestore et déclenche le premier rendu
 }
 init();
 </script>
