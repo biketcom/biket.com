@@ -327,6 +327,7 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 </head>
 <body>
 
+<div id="appShell" style="display:none">
 <div class="topbar">
   <div class="seg">
     <span>🚢 Livraison mondiale · 190+ pays</span>
@@ -465,6 +466,8 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 
 </main>
 
+</div>
+
 <div class="modal-bg" id="modalBg"><div class="modal" id="modalRoot"></div></div>
 <div class="toast" id="toast"></div>
 
@@ -584,6 +587,35 @@ function submitSignup(){
       window._pendingSignupPass = pass;
       openVerifyModal(email, name);
     }).catch(e=>{
+      // Cas particulier : l'email existe déjà. Si ce compte n'a jamais été
+      // confirmé, on reprend la vérification au lieu de bloquer l'utilisateur.
+      if (e && e.code === 'auth/email-already-in-use') {
+        auth.signInWithEmailAndPassword(email, pass).then(cred=>{
+          return db.collection('users').doc(cred.user.uid).get().then(doc=>{
+            const data = doc.exists ? doc.data() : null;
+            if (data && data.emailVerifie === true) {
+              return auth.signOut().then(()=>{
+                btn.disabled = false; btn.textContent = "S'inscrire";
+                authErr("Un compte confirmé existe déjà avec cet email. Connectez-vous plutôt.");
+              });
+            }
+            return auth.signOut().then(()=>{
+              btn.textContent = "Envoi du code...";
+              return fetch(VERIF_API_URL + "/send-code", {
+                method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})
+              });
+            }).then(()=>{
+              window._pendingSignupPass = pass;
+              openVerifyModal(email, name);
+            });
+          });
+        }).catch(()=>{
+          btn.disabled = false; btn.textContent = "S'inscrire";
+          authErr("Cet email est déjà associé à un compte non confirmé, mais ce mot de passe ne correspond pas à celui saisi lors de la première inscription. Utilisez ce mot de passe, ou contactez le support.");
+        });
+        return;
+      }
+
       btn.disabled = false; btn.textContent = "S'inscrire";
       const msg = String(e && e.message || e);
       if(msg.startsWith("timeout:")){
@@ -699,11 +731,24 @@ auth.onAuthStateChanged(user=>{
     document.getElementById('accountBtn').textContent = "👤 " + currentUser.name;
     document.getElementById('accountBtn').setAttribute('onclick','openAccountMenu()');
     ensureVendorProfile(user.uid, currentUser.name);
+    window._authRequired = false;
+    document.getElementById('appShell').style.display = '';
+    closeModal();
   } else {
     currentUser = null;
     currentVendorId = null;
     document.getElementById('accountBtn').textContent = "👤 Se connecter / S'inscrire";
     document.getElementById('accountBtn').setAttribute('onclick','openAuthModal()');
+    // Tant qu'il n'y a pas d'utilisateur connecté, on masque l'application
+    // et on force l'écran de connexion/inscription — rien d'autre n'est visible.
+    window._authRequired = true;
+    document.getElementById('appShell').style.display = 'none';
+    // On ne force l'ouverture du modal de connexion que si aucun modal
+    // n'est déjà affiché (pour ne pas écraser l'écran de saisie du code
+    // pendant une inscription en cours).
+    if (!document.getElementById('modalBg').classList.contains('active')) {
+      openAuthModal();
+    }
   }
 });
 function openAccountMenu(){
@@ -798,7 +843,7 @@ function openModal(html){
   document.getElementById('modalBg').classList.add('active');
 }
 function closeModal(){ document.getElementById('modalBg').classList.remove('active'); }
-document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg') closeModal(); });
+document.getElementById('modalBg').addEventListener('click', e=>{ if(e.target.id==='modalBg' && !window._authRequired) closeModal(); });
 
 /* =========================================================
    NAVIGATION
