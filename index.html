@@ -502,6 +502,12 @@ function toggleAuthMode(){
     : `Pas encore de compte ? <a href="#" style="color:var(--ink);font-weight:600" onclick="toggleAuthMode();return false;">S'inscrire</a>`;
 }
 function authErr(msg){ document.getElementById('authError').textContent = msg; }
+function withTimeout(promise, ms, label){
+  return Promise.race([
+    promise,
+    new Promise((_, reject)=> setTimeout(()=> reject(new Error("timeout:" + label)), ms))
+  ]);
+}
 function submitSignup(){
   const name = document.getElementById('authName').value.trim();
   const email = document.getElementById('authEmail').value.trim();
@@ -512,16 +518,21 @@ function submitSignup(){
   const btn = document.getElementById('authSubmitBtn');
   btn.disabled = true; btn.textContent = "Création en cours...";
 
-  auth.createUserWithEmailAndPassword(email, pass).then(cred=>{
-    return cred.user.updateProfile({displayName:name}).then(()=>{
-      return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
-    });
+  withTimeout(auth.createUserWithEmailAndPassword(email, pass), 15000, "creation_compte").then(cred=>{
+    btn.textContent = "Enregistrement du profil...";
+    return withTimeout(
+      cred.user.updateProfile({displayName:name}).then(()=>{
+        return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
+      }),
+      15000, "enregistrement_profil"
+    );
   }).then(()=>{
-    return fetch(VERIF_API_URL + "/send-code", {
+    btn.textContent = "Envoi du code...";
+    return withTimeout(fetch(VERIF_API_URL + "/send-code", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({email})
-    });
+    }), 15000, "envoi_code");
   }).then(r=>r.json()).then(data=>{
     if(data.error){
       authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis l'écran suivant.");
@@ -529,7 +540,18 @@ function submitSignup(){
     openVerifyModal(email, name);
   }).catch(e=>{
     btn.disabled = false; btn.textContent = "S'inscrire";
-    authErr(traduireErreurFirebase(e));
+    const msg = String(e && e.message || e);
+    if(msg.startsWith("timeout:")){
+      const step = msg.split(":")[1];
+      const stepLabels = {
+        creation_compte: "la création du compte (Firebase Auth)",
+        enregistrement_profil: "l'enregistrement du profil (Firestore)",
+        envoi_code: "l'envoi du code (serveur Brevo)"
+      };
+      authErr("Connexion trop lente ou bloquée à l'étape : " + (stepLabels[step] || step) + ". Réessayez avec une meilleure connexion.");
+    } else {
+      authErr(traduireErreurFirebase(e));
+    }
   });
 }
 
