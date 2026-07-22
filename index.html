@@ -321,9 +321,9 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
   .search-bar select{display:none;}
 }
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -567,7 +567,7 @@ function submitSignup(){
       return withTimeout(
         cred.user.updateProfile({displayName:name}).then(()=>{
           return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
-        }),
+        }).then(()=> auth.signOut()),
         15000, "enregistrement_profil"
       );
     }).then(()=>{
@@ -581,6 +581,7 @@ function submitSignup(){
       if(data.error){
         authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis l'écran suivant.");
       }
+      window._pendingSignupPass = pass;
       openVerifyModal(email, name);
     }).catch(e=>{
       btn.disabled = false; btn.textContent = "S'inscrire";
@@ -635,11 +636,16 @@ function submitVerifyCode(email, name){
     body: JSON.stringify({email, code})
   }).then(r=>r.json()).then(data=>{
     if(data.valid){
-      const user = auth.currentUser;
-      const upd = user ? db.collection('users').doc(user.uid).update({emailVerifie:true}) : Promise.resolve();
-      upd.then(()=>{
+      const pass = window._pendingSignupPass;
+      window._pendingSignupPass = null;
+      auth.signInWithEmailAndPassword(email, pass).then(cred=>{
+        return db.collection('users').doc(cred.user.uid).update({emailVerifie:true});
+      }).then(()=>{
         closeModal();
         toast("Compte confirmé — bienvenue " + name + " !");
+      }).catch(()=>{
+        btn.disabled = false; btn.textContent = "Confirmer";
+        authErr("Code validé, mais la connexion a échoué. Essayez de vous connecter manuellement.");
       });
     } else {
       btn.disabled = false; btn.textContent = "Confirmer";
