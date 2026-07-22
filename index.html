@@ -470,26 +470,10 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 
 <script>
 /* =========================================================
-   FIREBASE — authentification et base de données partagée
-   (doit être initialisé EN PREMIER, avant toute fonction
-   qui utilise auth/db, sinon "Cannot access before initialization")
-   ========================================================= */
-const firebaseConfig = {
-  apiKey: "AIzaSyDqcdgaMwGU8LNqjNjT9sArSI1DaYA4-2g",
-  authDomain: "biketcom-a8a37.firebaseapp.com",
-  projectId: "biketcom-a8a37",
-  storageBucket: "biketcom-a8a37.firebasestorage.app",
-  messagingSenderId: "133193385920",
-  appId: "1:133193385920:web:6a606e5015d36260f1aa25"
-};
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
-
-/* =========================================================
    DONNÉES EN MÉMOIRE (démo — aucune persistance externe)
    ========================================================= */
 const CATEGORIES = ["Électronique","Textile & Mode","Machines industrielles","Maison & Jardin","Beauté & Santé","Auto & Moto"];
+const VERIF_API_URL = "https://biketcom.biket-comcontact.workers.dev";
 
 /* ---------- Authentification ---------- */
 function openAuthModal(){
@@ -518,78 +502,86 @@ function toggleAuthMode(){
     : `Pas encore de compte ? <a href="#" style="color:var(--ink);font-weight:600" onclick="toggleAuthMode();return false;">S'inscrire</a>`;
 }
 function authErr(msg){ document.getElementById('authError').textContent = msg; }
-const CODE_WORKER_URL = "https://biketcom.biket-comcontact.workers.dev";
-
 function submitSignup(){
   const name = document.getElementById('authName').value.trim();
   const email = document.getElementById('authEmail').value.trim();
   const pass = document.getElementById('authPass').value;
   if(!name){ authErr("Merci d'indiquer votre nom."); return; }
   if(!email || !pass || pass.length<6){ authErr("Email valide et mot de passe de 6 caractères minimum requis."); return; }
+
+  const btn = document.getElementById('authSubmitBtn');
+  btn.disabled = true; btn.textContent = "Création en cours...";
+
   auth.createUserWithEmailAndPassword(email, pass).then(cred=>{
     return cred.user.updateProfile({displayName:name}).then(()=>{
-      return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifiedCustom:false});
+      return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
     });
   }).then(()=>{
-    return fetch(CODE_WORKER_URL + "/send-code", {
-      method: "POST",
-      headers: {"Content-Type":"application/json"},
+    return fetch(VERIF_API_URL + "/send-code", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
       body: JSON.stringify({email})
     });
-  }).then(resp=>{
-    if(!resp.ok){ throw new Error("send_failed"); }
-    showVerifyCodeScreen(email, name);
-  }).catch(e=>{
-    if(e && e.message === "send_failed"){
-      authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis votre profil.");
-    } else {
-      authErr(traduireErreurFirebase(e));
+  }).then(r=>r.json()).then(data=>{
+    if(data.error){
+      authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis l'écran suivant.");
     }
+    openVerifyModal(email, name);
+  }).catch(e=>{
+    btn.disabled = false; btn.textContent = "S'inscrire";
+    authErr(traduireErreurFirebase(e));
   });
 }
 
-function showVerifyCodeScreen(email, name){
+/* ---------- Vérification du code à 6 chiffres ---------- */
+function openVerifyModal(email, name){
   openModal(`
-    <h3>Vérifiez votre email</h3>
+    <h3>Confirmez votre email</h3>
     <p style="font-size:13px;color:var(--slate);margin-bottom:14px">
-      Un code à 6 chiffres a été envoyé à <strong>${email}</strong>. Saisissez-le ci-dessous.
+      Un code à 6 chiffres a été envoyé à <strong>${email}</strong>. Il expire dans 10 minutes.
     </p>
-    <div class="form-field"><label>Code de confirmation</label><input id="verifyCodeInput" maxlength="6" placeholder="123456"></div>
-    <div id="verifyError" style="color:var(--red);font-size:12px;margin-bottom:10px"></div>
-    <button class="btn btn-primary btn-full" onclick="submitVerifyCode('${email}','${name.replace(/'/g,"\\'")}')">Valider le code</button>
+    <div class="form-field"><label>Code de confirmation</label>
+      <input id="verifCode" maxlength="6" inputmode="numeric" placeholder="123456" style="letter-spacing:4px;font-size:18px;text-align:center">
+    </div>
+    <div id="authError" style="color:var(--red);font-size:12px;margin-bottom:10px"></div>
+    <button class="btn btn-primary btn-full" id="verifSubmitBtn" onclick="submitVerifyCode('${email}','${name}')">Confirmer</button>
     <p style="text-align:center;font-size:12.5px;color:var(--slate);margin-top:12px">
-      Vous n'avez rien reçu ? <a href="#" style="color:var(--ink);font-weight:600" onclick="resendCode('${email}');return false;">Renvoyer le code</a>
+      Pas reçu de code ? <a href="#" style="color:var(--ink);font-weight:600" onclick="resendVerifyCode('${email}');return false;">Renvoyer</a>
     </p>
   `);
 }
-
 function submitVerifyCode(email, name){
-  const code = document.getElementById('verifyCodeInput').value.trim();
-  const errBox = document.getElementById('verifyError');
-  if(!code || code.length!==6){ errBox.textContent = "Merci de saisir les 6 chiffres du code."; return; }
-  fetch(CODE_WORKER_URL + "/verify-code", {
+  const code = document.getElementById('verifCode').value.trim();
+  if(!code || code.length!==6){ authErr("Merci de saisir les 6 chiffres du code."); return; }
+  const btn = document.getElementById('verifSubmitBtn');
+  btn.disabled = true; btn.textContent = "Vérification...";
+  fetch(VERIF_API_URL + "/verify-code", {
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body: JSON.stringify({email, code})
   }).then(r=>r.json()).then(data=>{
     if(data.valid){
       const user = auth.currentUser;
-      if(user){ db.collection('users').doc(user.uid).update({emailVerifiedCustom:true}); }
-      closeModal();
-      toast("Compte créé et vérifié — bienvenue " + name + " !");
+      const upd = user ? db.collection('users').doc(user.uid).update({emailVerifie:true}) : Promise.resolve();
+      upd.then(()=>{
+        closeModal();
+        toast("Compte confirmé — bienvenue " + name + " !");
+      });
     } else {
-      errBox.textContent = "Code incorrect ou expiré. Réessayez ou demandez un nouveau code.";
+      btn.disabled = false; btn.textContent = "Confirmer";
+      authErr(data.reason === "wrong_code" ? "Code incorrect." : "Code expiré. Demandez-en un nouveau.");
     }
-  }).catch(()=>{ errBox.textContent = "Erreur de vérification. Réessayez."; });
+  }).catch(()=>{
+    btn.disabled = false; btn.textContent = "Confirmer";
+    authErr("Erreur réseau, veuillez réessayer.");
+  });
 }
-
-function resendCode(email){
-  fetch(CODE_WORKER_URL + "/send-code", {
+function resendVerifyCode(email){
+  fetch(VERIF_API_URL + "/send-code", {
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body: JSON.stringify({email})
-  }).then(()=> toast("Nouveau code envoyé à " + email))
-    .catch(()=> toast("Échec de l'envoi. Réessayez."));
+  }).then(()=>toast("Nouveau code envoyé.")).catch(()=>toast("Échec de l'envoi, réessayez."));
 }
 function submitLogin(){
   const email = document.getElementById('authEmail').value.trim();
@@ -687,6 +679,21 @@ const SEED_PRODUCTS = [
   {id:"p11", vendorId:"v5", cat:"Beauté & Santé", title:"Savons naturels au beurre de karité (lot)", emoji:"🧼", unitPrice:1.4, moq:300, stock:50000, rating:4.4, tiers:[[300,1.4],[1500,1.1],[6000,0.85]], desc:"Savons artisanaux, ingrédients 100% naturels, sans paraben, personnalisation étiquette."},
   {id:"p12", vendorId:"v5", cat:"Beauté & Santé", title:"Huiles essentielles bio - coffret assorti", emoji:"🌿", unitPrice:5.6, moq:150, stock:20000, rating:4.5, tiers:[[150,5.6],[600,4.7],[2400,3.9]], desc:"Coffret de 6 huiles essentielles biologiques certifiées, flacons ambrés 10ml."},
 ];
+
+/* =========================================================
+   FIREBASE — authentification et base de données partagée
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyDqcdgaMwGU8LNqjNjT9sArSI1DaYA4-2g",
+  authDomain: "biketcom-a8a37.firebaseapp.com",
+  projectId: "biketcom-a8a37",
+  storageBucket: "biketcom-a8a37.firebasestorage.app",
+  messagingSenderId: "133193385920",
+  appId: "1:133193385920:web:6a606e5015d36260f1aa25"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
 let PRODUCTS = []; // rempli en direct depuis Firestore
 let currentUser = null;      // {uid, name, email} une fois connecté, sinon null
