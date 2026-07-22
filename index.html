@@ -495,28 +495,6 @@ const db = firebase.firestore();
 const CATEGORIES = ["Électronique","Textile & Mode","Machines industrielles","Maison & Jardin","Beauté & Santé","Auto & Moto"];
 const VERIF_API_URL = "https://biketcom.biket-comcontact.workers.dev";
 
-/* ---------- Filet de sécurité : afficher toute erreur JS non gérée (diagnostic mobile) ---------- */
-window.addEventListener('error', function(e){
-  const box = document.getElementById('globalErrBox') || (function(){
-    const d = document.createElement('div');
-    d.id = 'globalErrBox';
-    d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#b00020;color:#fff;padding:10px;font-size:12px;z-index:99999;max-height:40vh;overflow:auto';
-    document.body.appendChild(d);
-    return d;
-  })();
-  box.textContent = "Erreur JS : " + (e.message || e.error) + " (" + (e.filename||'') + ":" + (e.lineno||'') + ")";
-});
-window.addEventListener('unhandledrejection', function(e){
-  const box = document.getElementById('globalErrBox') || (function(){
-    const d = document.createElement('div');
-    d.id = 'globalErrBox';
-    d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#b00020;color:#fff;padding:10px;font-size:12px;z-index:99999;max-height:40vh;overflow:auto';
-    document.body.appendChild(d);
-    return d;
-  })();
-  box.textContent = "Promesse non gérée : " + (e.reason && e.reason.message || e.reason);
-});
-
 /* ---------- Authentification ---------- */
 function openAuthModal(){
   openModal(`
