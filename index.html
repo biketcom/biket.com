@@ -470,6 +470,23 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 
 <script>
 /* =========================================================
+   FIREBASE — authentification et base de données partagée
+   (doit être initialisé EN PREMIER, avant tout code qui
+   utilise auth/db, sinon erreur "Cannot access before init")
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyDqcdgaMwGU8LNqjNjT9sArSI1DaYA4-2g",
+  authDomain: "biketcom-a8a37.firebaseapp.com",
+  projectId: "biketcom-a8a37",
+  storageBucket: "biketcom-a8a37.firebasestorage.app",
+  messagingSenderId: "133193385920",
+  appId: "1:133193385920:web:6a606e5015d36260f1aa25"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+/* =========================================================
    DONNÉES EN MÉMOIRE (démo — aucune persistance externe)
    ========================================================= */
 const CATEGORIES = ["Électronique","Textile & Mode","Machines industrielles","Maison & Jardin","Beauté & Santé","Auto & Moto"];
@@ -737,20 +754,6 @@ const SEED_PRODUCTS = [
   {id:"p12", vendorId:"v5", cat:"Beauté & Santé", title:"Huiles essentielles bio - coffret assorti", emoji:"🌿", unitPrice:5.6, moq:150, stock:20000, rating:4.5, tiers:[[150,5.6],[600,4.7],[2400,3.9]], desc:"Coffret de 6 huiles essentielles biologiques certifiées, flacons ambrés 10ml."},
 ];
 
-/* =========================================================
-   FIREBASE — authentification et base de données partagée
-   ========================================================= */
-const firebaseConfig = {
-  apiKey: "AIzaSyDqcdgaMwGU8LNqjNjT9sArSI1DaYA4-2g",
-  authDomain: "biketcom-a8a37.firebaseapp.com",
-  projectId: "biketcom-a8a37",
-  storageBucket: "biketcom-a8a37.firebasestorage.app",
-  messagingSenderId: "133193385920",
-  appId: "1:133193385920:web:6a606e5015d36260f1aa25"
-};
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
 
 let PRODUCTS = []; // rempli en direct depuis Firestore
 let currentUser = null;      // {uid, name, email} une fois connecté, sinon null
