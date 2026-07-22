@@ -475,6 +475,28 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 const CATEGORIES = ["Électronique","Textile & Mode","Machines industrielles","Maison & Jardin","Beauté & Santé","Auto & Moto"];
 const VERIF_API_URL = "https://biketcom.biket-comcontact.workers.dev";
 
+/* ---------- Filet de sécurité : afficher toute erreur JS non gérée (diagnostic mobile) ---------- */
+window.addEventListener('error', function(e){
+  const box = document.getElementById('globalErrBox') || (function(){
+    const d = document.createElement('div');
+    d.id = 'globalErrBox';
+    d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#b00020;color:#fff;padding:10px;font-size:12px;z-index:99999;max-height:40vh;overflow:auto';
+    document.body.appendChild(d);
+    return d;
+  })();
+  box.textContent = "Erreur JS : " + (e.message || e.error) + " (" + (e.filename||'') + ":" + (e.lineno||'') + ")";
+});
+window.addEventListener('unhandledrejection', function(e){
+  const box = document.getElementById('globalErrBox') || (function(){
+    const d = document.createElement('div');
+    d.id = 'globalErrBox';
+    d.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#b00020;color:#fff;padding:10px;font-size:12px;z-index:99999;max-height:40vh;overflow:auto';
+    document.body.appendChild(d);
+    return d;
+  })();
+  box.textContent = "Promesse non gérée : " + (e.reason && e.reason.message || e.reason);
+});
+
 /* ---------- Authentification ---------- */
 function openAuthModal(){
   openModal(`
@@ -518,41 +540,54 @@ function submitSignup(){
   const btn = document.getElementById('authSubmitBtn');
   btn.disabled = true; btn.textContent = "Création en cours...";
 
-  withTimeout(auth.createUserWithEmailAndPassword(email, pass), 15000, "creation_compte").then(cred=>{
-    btn.textContent = "Enregistrement du profil...";
-    return withTimeout(
-      cred.user.updateProfile({displayName:name}).then(()=>{
-        return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
-      }),
-      15000, "enregistrement_profil"
-    );
-  }).then(()=>{
-    btn.textContent = "Envoi du code...";
-    return withTimeout(fetch(VERIF_API_URL + "/send-code", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({email})
-    }), 15000, "envoi_code");
-  }).then(r=>r.json()).then(data=>{
-    if(data.error){
-      authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis l'écran suivant.");
+  try {
+    if (typeof firebase === 'undefined' || typeof auth === 'undefined' || typeof db === 'undefined') {
+      throw new Error("firebase_non_charge");
     }
-    openVerifyModal(email, name);
-  }).catch(e=>{
+
+    withTimeout(auth.createUserWithEmailAndPassword(email, pass), 15000, "creation_compte").then(cred=>{
+      btn.textContent = "Enregistrement du profil...";
+      return withTimeout(
+        cred.user.updateProfile({displayName:name}).then(()=>{
+          return db.collection('users').doc(cred.user.uid).set({name, email, createdAt: Date.now(), emailVerifie:false});
+        }),
+        15000, "enregistrement_profil"
+      );
+    }).then(()=>{
+      btn.textContent = "Envoi du code...";
+      return withTimeout(fetch(VERIF_API_URL + "/send-code", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({email})
+      }), 15000, "envoi_code");
+    }).then(r=>r.json()).then(data=>{
+      if(data.error){
+        authErr("Compte créé, mais l'envoi du code a échoué. Réessayez depuis l'écran suivant.");
+      }
+      openVerifyModal(email, name);
+    }).catch(e=>{
+      btn.disabled = false; btn.textContent = "S'inscrire";
+      const msg = String(e && e.message || e);
+      if(msg.startsWith("timeout:")){
+        const step = msg.split(":")[1];
+        const stepLabels = {
+          creation_compte: "la création du compte (Firebase Auth)",
+          enregistrement_profil: "l'enregistrement du profil (Firestore)",
+          envoi_code: "l'envoi du code (serveur Brevo)"
+        };
+        authErr("Connexion trop lente ou bloquée à l'étape : " + (stepLabels[step] || step) + ". Réessayez avec une meilleure connexion.");
+      } else {
+        authErr(traduireErreurFirebase(e));
+      }
+    });
+  } catch(e) {
     btn.disabled = false; btn.textContent = "S'inscrire";
-    const msg = String(e && e.message || e);
-    if(msg.startsWith("timeout:")){
-      const step = msg.split(":")[1];
-      const stepLabels = {
-        creation_compte: "la création du compte (Firebase Auth)",
-        enregistrement_profil: "l'enregistrement du profil (Firestore)",
-        envoi_code: "l'envoi du code (serveur Brevo)"
-      };
-      authErr("Connexion trop lente ou bloquée à l'étape : " + (stepLabels[step] || step) + ". Réessayez avec une meilleure connexion.");
+    if (e.message === "firebase_non_charge") {
+      authErr("Impossible de charger les services nécessaires (Firebase). Vérifiez votre connexion, désactivez un éventuel bloqueur de publicité/traqueurs, puis réessayez.");
     } else {
-      authErr(traduireErreurFirebase(e));
+      authErr("Erreur inattendue : " + e.message);
     }
-  });
+  }
 }
 
 /* ---------- Vérification du code à 6 chiffres ---------- */
