@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Biket.com — Marketplace B2B/B2C</title>
+
+<!-- PWA : permet l'installation sur téléphone / PC -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1e3d">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Biket.com">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -23,7 +32,7 @@
   --radius:10px;
 }
 *{box-sizing:border-box;}
-html,body{margin:0;padding:0;}
+html,body{margin:0;padding:0;width:100%;overflow-x:hidden;}
 body{
   font-family:'Inter',sans-serif;
   background:var(--paper);
@@ -319,6 +328,17 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
   .pd-image{width:100%;}
   .stat-cards{grid-template-columns:repeat(2,1fr);}
   .search-bar select{display:none;}
+
+  /* En-tête : empêcher tout débordement horizontal sur mobile */
+  .topbar{flex-wrap:wrap;padding:6px 12px;gap:6px;}
+  .topbar .seg{gap:8px;flex-wrap:wrap;}
+  header.main{flex-wrap:wrap;padding:10px 12px;gap:10px;}
+  .logo{order:1;}
+  .search-bar{order:3;flex-basis:100%;max-width:none;}
+  nav.actions{order:2;margin-left:auto;gap:8px;}
+  .nav-btn{font-size:10px;}
+  .nav-btn .ic{font-size:16px;}
+  .subnav{padding:0 12px;gap:14px;}
 }
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin="anonymous"></script>
@@ -1457,6 +1477,11 @@ function init(){
   watchProducts(); // charge les produits en direct depuis Firestore et déclenche le premier rendu
 }
 init();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
 </script>
 </body>
 </html>
