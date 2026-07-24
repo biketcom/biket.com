@@ -344,6 +344,7 @@ table.data-table td{padding:10px 12px;border-top:1px solid var(--line);}
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" crossorigin="anonymous"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -508,6 +509,7 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+const storage = firebase.storage();
 
 /* =========================================================
    DONNÉES EN MÉMOIRE (démo — aucune persistance externe)
@@ -877,7 +879,7 @@ function productCard(p){
   <div class="card" onclick="openProduct('${p.id}')">
     <div class="thumb" style="background:${thumbColor(p.cat)}">
       ${v.verified?'<span class="verif">✓ Vérifié</span>':''}
-      ${p.emoji}
+      ${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;height:100%;object-fit:cover">` : p.emoji}
     </div>
     <div class="body">
       <div class="title">${p.title}</div>
@@ -971,10 +973,11 @@ function openProduct(id){
   document.getElementById('productDetailRoot').innerHTML = `
     <button class="btn btn-outline" style="margin-bottom:16px" onclick="navigate('catalog')">← Retour au catalogue</button>
     <div class="product-detail">
-      <div class="pd-image" style="background:${thumbColor(p.cat)}">${p.emoji}</div>
+      <div class="pd-image" style="background:${thumbColor(p.cat)}">${p.photoUrl ? `<img src="${p.photoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">` : p.emoji}</div>
       <div class="pd-info">
         <span class="tag">${p.cat}</span>
         <h1>${p.title}</h1>
+        ${p.videoUrl ? `<video src="${p.videoUrl}" controls style="width:100%;max-height:260px;border-radius:8px;margin:10px 0;background:#000"></video>` : ''}
         <div class="pd-meta">
           <span class="stars">${'★'.repeat(Math.round(p.rating))}${'☆'.repeat(5-Math.round(p.rating))}</span>
           <span>${p.rating}/5</span>
@@ -1376,8 +1379,37 @@ function openAddProductModal(){
       <div class="form-field" style="flex:1"><label>Prix unitaire (€)</label><input type="number" id="npPrice" value="10"></div>
       <div class="form-field" style="flex:1"><label>MOQ</label><input type="number" id="npMoq" value="50"></div>
     </div>
-    <button class="btn btn-primary btn-full" onclick="addProduct()">Publier le produit</button>
+    <div class="form-field">
+      <label>Photo du produit</label>
+      <input type="file" id="npPhoto" accept="image/*" onchange="previewMedia('npPhoto','npPhotoPreview')">
+      <img id="npPhotoPreview" style="display:none;margin-top:8px;max-width:100%;max-height:140px;border-radius:6px;border:1px solid var(--line)">
+    </div>
+    <div class="form-field">
+      <label>Vidéo du produit (optionnel)</label>
+      <input type="file" id="npVideo" accept="video/*" onchange="previewMedia('npVideo','npVideoPreview')">
+      <video id="npVideoPreview" controls style="display:none;margin-top:8px;max-width:100%;max-height:160px;border-radius:6px;border:1px solid var(--line)"></video>
+    </div>
+    <div id="npProgress" style="font-size:12px;color:var(--slate);margin-bottom:8px"></div>
+    <button class="btn btn-primary btn-full" id="npSubmitBtn" onclick="addProduct()">Publier le produit</button>
   `);
+}
+function previewMedia(inputId, previewId){
+  const input = document.getElementById(inputId);
+  const preview = document.getElementById(previewId);
+  const file = input.files[0];
+  if(!file){ preview.style.display='none'; return; }
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+}
+function uploadFile(file, path, onProgress){
+  return new Promise((resolve, reject)=>{
+    const task = storage.ref(path).put(file);
+    task.on('state_changed',
+      snap => onProgress && onProgress(Math.round(100*snap.bytesTransferred/snap.totalBytes)),
+      err => reject(err),
+      () => task.snapshot.ref.getDownloadURL().then(resolve).catch(reject)
+    );
+  });
 }
 function addProduct(){
   if(!requireAuth("publier un produit")) return;
@@ -1386,12 +1418,39 @@ function addProduct(){
   const price = Number(document.getElementById('npPrice').value)||10;
   const moq = Number(document.getElementById('npMoq').value)||50;
   const cat = document.getElementById('npCat').value;
+  const photoFile = document.getElementById('npPhoto').files[0];
+  const videoFile = document.getElementById('npVideo').files[0];
   const id = 'p_'+currentVendorId.slice(0,6)+'_'+Date.now();
-  const product = {id, vendorId:currentVendorId, cat, title, emoji:"📦", unitPrice:price, moq, stock:1000, rating:4.0,
-    tiers:[[moq,price],[moq*4,+(price*0.85).toFixed(2)],[moq*10,+(price*0.7).toFixed(2)]], desc:"Nouveau produit publié par le vendeur."};
-  db.collection('products').doc(id).set(product).then(()=>{
+
+  const btn = document.getElementById('npSubmitBtn');
+  const progressEl = document.getElementById('npProgress');
+  btn.disabled = true; btn.textContent = "Publication en cours...";
+
+  const uploads = [];
+  if(photoFile){
+    uploads.push(uploadFile(photoFile, `products/${id}/photo_${photoFile.name}`, pct=>{
+      progressEl.textContent = "Envoi de la photo... " + pct + "%";
+    }).then(url=>({photoUrl:url})));
+  }
+  if(videoFile){
+    uploads.push(uploadFile(videoFile, `products/${id}/video_${videoFile.name}`, pct=>{
+      progressEl.textContent = "Envoi de la vidéo... " + pct + "%";
+    }).then(url=>({videoUrl:url})));
+  }
+
+  Promise.all(uploads).then(results=>{
+    const media = Object.assign({}, ...results);
+    const product = {id, vendorId:currentVendorId, cat, title, emoji:"📦", unitPrice:price, moq, stock:1000, rating:4.0,
+      tiers:[[moq,price],[moq*4,+(price*0.85).toFixed(2)],[moq*10,+(price*0.7).toFixed(2)]],
+      desc:"Nouveau produit publié par le vendeur.",
+      photoUrl: media.photoUrl || null, videoUrl: media.videoUrl || null};
+    return db.collection('products').doc(id).set(product);
+  }).then(()=>{
     closeModal(); vendorTab('products'); toast("Produit publié ✔ — visible par tous les visiteurs");
-  }).catch(()=>toast("Échec de la publication."));
+  }).catch(()=>{
+    btn.disabled = false; btn.textContent = "Publier le produit";
+    toast("Échec de la publication (photo/vidéo trop lourde, ou connexion instable).");
+  });
 }
 function renderVendorMessages(root){
   const myConvs = conversations.filter(c=>c.vendorId===currentVendorId);
